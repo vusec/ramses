@@ -1,106 +1,54 @@
 /*
  * Copyright (c) 2016 Andrei Tatar
+ * Copyright (c) 2017-2018 Vrije Universiteit Amsterdam
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
+ * This program is licensed under the GPL2+.
  */
 
 /* Miscellaneous utility functions for DRAM addresses */
 
-#ifndef _HAMTIME_RAMSES_UTIL_H
-#define _HAMTIME_RAMSES_UTIL_H 1
+#ifndef RAMSES_UTIL_H
+#define RAMSES_UTIL_H 1
 
 #include <ramses/types.h>
 
 #include <stdbool.h>
 
-/* For use in printf() */
+/* For use in printf()-like functions */
 #define DRAMADDR_HEX_FMTSTR "(%1x %1x %1x %1x %4x %3x)"
 
-
+/* DRAM organization level, from fine to coarse */
+enum DRAMLevel {
+	DRAM_ROW,
+	DRAM_BANK,
+	DRAM_RANK,
+	DRAM_DIMM,
+	DRAM_CHAN
+};
+/* Check whether two DRAM addresses are on the same DRAM level */
+static inline bool ramses_dramaddr_same(enum DRAMLevel lvl,
+                                        struct DRAMAddr a, struct DRAMAddr b)
+{
+	bool ret = true;
+	switch (lvl) {
+		case DRAM_ROW:  ret = ret && (a.row == b.row);
+		case DRAM_BANK: ret = ret && (a.bank == b.bank);
+		case DRAM_RANK: ret = ret && (a.rank == b.rank);
+		case DRAM_DIMM: ret = ret && (a.dimm == b.dimm);
+		case DRAM_CHAN: ret = ret && (a.chan == b.chan);
+	}
+	return ret;
+}
+/* qsort()-like comparison function for DRAM addresses */
 static inline int ramses_dramaddr_cmp(struct DRAMAddr a, struct DRAMAddr b)
 {
-	int64_t amag = ((int64_t)a.chan << 56) + ((int64_t)a.dimm << 48) + ((int64_t)a.rank << 40) +
-	               ((int64_t)a.bank << 32) + ((int64_t)a.row << 16) + a.col;
-	int64_t bmag = ((int64_t)b.chan << 56) + ((int64_t)b.dimm << 48) + ((int64_t)b.rank << 40) +
-	               ((int64_t)b.bank << 32) + ((int64_t)b.row << 16) + b.col;
-	int64_t d = amag - bmag;
-	return d ? ((d > 0) ? 1 : -1) : 0;
-}
-
-static inline bool ramses_same_bank(struct DRAMAddr a, struct DRAMAddr b)
-{
-	return (
-		a.chan == b.chan &&
-		a.dimm == b.dimm &&
-		a.rank == b.rank &&
-		a.bank == b.bank
-	);
-}
-
-static inline bool ramses_same_row(struct DRAMAddr a, struct DRAMAddr b)
-{
-	return (ramses_same_bank(a,b) && a.row == b.row);
-}
-
-static inline bool ramses_succ_rows(struct DRAMAddr a, struct DRAMAddr b)
-{
-	return (ramses_same_bank(a,b) && (a.row + 1) == b.row);
-}
-
-static inline struct DRAMAddr ramses_dramaddr_diff(struct DRAMAddr a, struct DRAMAddr b)
-{
-	struct DRAMAddr ret = {
-		.chan = a.chan - b.chan,
-		.dimm = a.dimm - b.dimm,
-		.rank = a.rank - b.rank,
-		.bank = a.bank - b.bank,
-		.row = a.row - b.row,
-		.col = a.col - b.col
-	};
-	return ret;
-}
-
-static inline struct DRAMAddr ramses_dramaddr_add(struct DRAMAddr a, struct DRAMAddr b)
-{
-	struct DRAMAddr ret = {
-		.chan = a.chan + b.chan,
-		.dimm = a.dimm + b.dimm,
-		.rank = a.rank + b.rank,
-		.bank = a.bank + b.bank,
-		.row = a.row + b.row,
-		.col = a.col + b.col
-	};
-	return ret;
-}
-
-static inline int ramses_dramaddr_rowdiff(struct DRAMAddr a, struct DRAMAddr b)
-{
-	return ramses_same_bank(a,b) ? (a.row - b.row) : 0xfffff;
-}
-
-static inline struct DRAMAddr ramses_dramaddr_addrows(struct DRAMAddr a, int rd)
-{
-	struct DRAMAddr ret = {
-		.chan = a.chan,
-		.dimm = a.dimm,
-		.rank = a.rank,
-		.bank = a.bank,
-		.row = a.row + rd,
-		.col = a.col
-	};
-	return ret;
+	int ch = a.chan - b.chan;
+	int di = a.dimm - b.dimm;
+	int ra = a.rank - b.rank;
+	int ba = a.bank - b.bank;
+	int rw = a.row - b.row;
+	int cl = a.col - b.col;
+	return !ch ? !di ? !ra ? !ba ? !rw ? cl : rw : ba : ra : di : ch;
 }
 
 #endif /* util.h */

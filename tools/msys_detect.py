@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: UTF-8 -*-
 # Copyright (c) 2016 Andrei Tatar
+# Copyright (c) 2017-2018 Vrije Universiteit Amsterdam
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -24,50 +25,44 @@ import argparse
 import subprocess
 
 from collections import namedtuple
+from collections import OrderedDict
 
-CONTROLLERS = [
-    'naive_ddr3',
-    'naive_ddr4',
-    'intel_sandy',
-    'intel_ivy',
-    'intel_haswell'
-]
+_CTRL = OrderedDict([
+    ('naive', (('ddr3', 'ddr3'), ('ddr4', 'ddr4'))),
+    ('intel', (('sandy', 'ddr3'), ('ivyhaswell', 'ddr3'))),
+])
 
-ROUTERS = [
-    'passthru',
-    'x86_generic',
-]
+CONTROLLERS = {':'.join((x, y[0])) : y[1] for x in _CTRL for y in _CTRL[x]}
 
 REMAPS = [
-    'none',
-    'r3x0',
-    'r3x21',
-    'r3x210',
+    None,
+    'rasxor:bit=3:mask=6',
+    'custom rasxor',
 ]
 
 
-def _ask(name, lst):
+def _ask(name, lst, default=None):
+    chmsg = 'Choice: ' if default is None else 'Choice [{}]: '.format(default)
     print('Select {}:'.format(name))
     while True:
         for i, s in enumerate(lst):
             print('\t{}. {}'.format(i, s))
-        inp = input('Choice: ')
+        inp = input(chmsg)
         try:
-            return lst[int(inp)]
+            return lst[int(inp) if inp != '' or default is None else default]
         except (ValueError, IndexError):
             pass
 
 
 def _ask_yn(question, default=True):
-    ans = input('{} {}: '.format(question, '[Y/n]' if default else '[y/N]'))
-    if ans == '':
-        return default
-    elif ans.lower() == 'y':
-        return True
-    elif ans.lower() == 'n':
-        return False
-    else:
-        return None
+    while True:
+        ans = input('{} {}: '.format(question, '[Y/n]' if default else '[y/N]'))
+        if ans == '':
+            return default
+        elif ans.lower() == 'y':
+            return True
+        elif ans.lower() == 'n':
+            return False
 
 
 def _anyint(s):
@@ -80,11 +75,24 @@ def _anyint(s):
     else:
         return int(s)
 
-_X86_SMM = namedtuple('_SMM', ['remap', 'hasME', 'pci_start', 'topmem'])
-_GEOM = namedtuple('_GEOM', ['chans', 'dimms', 'ranks'])
+
+def _ask_int(name, default=None):
+    if default is not None:
+        msg = '{} [{}]: '.format(name, default)
+    else:
+        msg = '{}: '.format(name)
+    while True:
+        inp = input(msg)
+        try:
+            return _anyint(inp if inp != '' or default is None else default)
+        except ValueError:
+            pass
+
+_INTEL_SMM = namedtuple('_INTEL_SMM', ['remap', 'pci_start', 'topmem'])
+_INTEL_GEOM = namedtuple('_INTEL_GEOM', ['chans', 'dimms', 'ranks'])
 
 
-def _x86_smm_detect():
+def _intel_smm_detect():
     MEM_GRAN = 1 << 30 # Assume system memory is rounded to gigabytes
     iomem_rex = re.compile(r'(\w+)-(\w+)\s:\s(.+)')
     with open('/proc/iomem') as f:
@@ -97,41 +105,17 @@ def _x86_smm_detect():
     topmem = (int([x for x in lines if 'PCI' not in x[-1]][-1][1], 16) + 1) - 0x100000000 + pci_start
     topmem = math.ceil(topmem / MEM_GRAN) * MEM_GRAN
     remap = len([x for x in lines if int(x[0], 16) >= 0x100000000]) > 0
-    try:
-        os.stat('/dev/mei0')
-        hasme = True
-    except FileNotFoundError:
-        hasme = False
-    return _X86_SMM(remap, hasme, pci_start, topmem)
+    return _INTEL_SMM(remap, pci_start, topmem)
 
 
-def _x86_smm_ask():
-    while True:
-        ans = _ask_yn('PCI hole remapping active?')
-        if ans is not None:
-            remap = ans
-            break
-    while True:
-        ans = _ask_yn('Intel ME memory stealing active?')
-        if ans is not None:
-            hasme = ans
-            break
-    while True:
-        try:
-            pci_start = _anyint(input('PCI start address: '))
-            break
-        except ValueError:
-            pass
-    while True:
-        try:
-            topmem = _anyint(input('Total memory size: '))
-            break
-        except ValueError:
-            pass
-    return _X86_SMM(remap, hasme, pci_start, topmem)
+def _intel_smm_ask():
+    remap = _ask_yn('PCI hole remapping active?')
+    pci_start = _ask_int('PCI start address')
+    topmem = _ask_int('Total memory size')
+    return _INTEL_SMM(remap, pci_start, topmem)
 
 
-def _x86_geom_guess():
+def _intel_geom_guess():
     r = subprocess.check_output(['dmidecode', '-t', 'memory'])
     dmi = r.decode('ascii').split('\n')
     sizes = [x.strip().split(': ') for x in dmi if 'Size' in x]
@@ -147,119 +131,50 @@ def _x86_geom_guess():
             except ValueError:
                 pass
     if len(sizes) == 1:
-        return _GEOM(1, 1, rank_guess)
+        return _INTEL_GEOM(1, 1, rank_guess)
     elif len(sizes) == 2:
         if nused == 2:
-            return _GEOM(1, 2, rank_guess)
+            return _INTEL_GEOM(1, 2, rank_guess)
         else:
-            return _GEOM(1, 1, rank_guess)
+            return _INTEL_GEOM(1, 1, rank_guess)
     elif len(sizes) == 4:
         if nused == 1:
-            return _GEOM(1, 1, rank_guess)
+            return _INTEL_GEOM(1, 1, rank_guess)
         elif nused == 4:
             # Typical dual-channel dual-dimm setup
-            return _GEOM(2, 2, rank_guess)
+            return _INTEL_GEOM(2, 2, rank_guess)
         elif nused == 2:
             if (used[0] and used[1]) or (used[2] and used[3]):
                 # Typical single-channel dual-dimm setup
-                return _GEOM(1, 2, rank_guess)
+                return _INTEL_GEOM(1, 2, rank_guess)
             elif (used[0] and used[2]) or (used[1] and used[3]):
                 # Typical dual-channel single-dimm setup
-                return _GEOM(2, 1, rank_guess)
+                return _INTEL_GEOM(2, 1, rank_guess)
             else:
                 # No idea; ask user
                 return None
         else:
-            # No idea; ask used
+            # No idea; ask user
             return None
     else:
         # No idea; ask user
         return None
 
 
-def _geom_ask():
-    while True:
-        try:
-            ch = int(input('Number of active channels: '))
-            break
-        except ValueError:
-            pass
-    while True:
-        try:
-            di = int(input('Number of DIMMs per channel: '))
-            break
-        except ValueError:
-            pass
-    while True:
-        try:
-            ra = int(input('Number of ranks per DIMM: '))
-            break
-        except ValueError:
-            pass
-    return _GEOM(ch, di, ra)
+def _intel_geom_ask():
+    ch = _ask_int('Number of active channels')
+    di = _ask_int('Number of DIMMs per channel')
+    ra = _ask_int('Number of ranks per DIMM')
+    return _INTEL_GEOM(ch, di, ra)
 
 
-class MSYS(namedtuple('MSYS', ['controller', 'router', 'dimm_remap', 'geometry', 'route_opts', 'controller_opts'])):
-    def to_file(self):
-        lines = [
-            'cntrl ' + self.controller,
-            'route ' + self.router,
-            'remap ' + self.dimm_remap
-        ]
-        if self.router == 'x86_generic':
-            lines.append('route_opts {},{},{}'.format(
-                self.route_opts.remap * 1 + self.route_opts.hasME * 2,
-                self.route_opts.pci_start, self.route_opts.topmem
-                )
-            )
-        if self.controller_opts:
-            lines.append('cntrl_opts ' + ','.join(self.controller_opts))
-
-        if self.geometry.chans == 2:
-            lines.append('chan')
-        if self.geometry.dimms == 2:
-            lines.append('dimm')
-        if self.geometry.ranks == 2:
-            lines.append('rank')
-
-        return '\n'.join(lines) + '\n'
-
-
-def _main():
-    parser = argparse.ArgumentParser(description='Detect memory system configuration')
-    parser.add_argument('-i', '--interactive-only', action='store_true',
-                        help='Do not attempt to autodetect anything; configure everything interactively')
-    args = parser.parse_args()
-
-    if os.geteuid() != 0 and not args.interactive_only:
-        print("For best autodetection results it's recommended you run this tool as superuser.")
-    outpath = './mem.msys'
-
-    geom = None
-    smm = None
-    ctrlo = []
-
-    cntrl = _ask('memory controller', CONTROLLERS)
-    if cntrl.startswith('intel'):
-        while True:
-            ans = _ask_yn('Enable address pin mirroring for second rank?')
-            if ans is not None:
-                if ans:
-                    ctrlo.append('rank_mirror')
-                break
-
-    route = _ask('physical address router', ROUTERS)
-    remap = _ask("on-DIMM remap strategy (if unsure, select 'none')", REMAPS)
-
-
-
-    if not args.interactive_only:
-        if 'x86' in route:
-            geom = _x86_geom_guess()
-            smm = _x86_smm_detect()
-        else:
-            geom = _GEOM(1, 1, 1)
-            smm = None
+def _intel_opts(cntrl, interactive):
+    if not interactive:
+        geom = _intel_geom_guess()
+        smm = _intel_smm_detect()
+    else:
+        geom = None
+        smm = None
 
     print('Autodetected memory geometry')
     while True:
@@ -273,28 +188,100 @@ def _main():
         if ans is True:
             break
         elif ans is False:
-            geom = _geom_ask()
+            geom = _intel_geom_ask()
 
     print('Autodetected routing options')
     while True:
-        if 'x86' in route and smm is not None:
+        if smm is not None:
             print('PCI IOMEM start: {}; Total installed RAM: {}'.format(hex(smm.pci_start), hex(smm.topmem)))
             print('PCI memory hole remapping is [{}]'.format('enabled' if smm.remap else 'disabled'))
-            print('Intel ME memory stealing is [{}]'.format('enabled' if smm.hasME else 'disabled'))
+            ans = _ask_yn('Is this correct?')
         else:
-            print('None')
-        ans = _ask_yn('Is this correct?')
+            print('Unknown')
+            ans = False
         if ans is True:
             break
-        elif ans is False and 'x86' in route:
-            smm = _x86_smm_ask()
+        elif ans is False:
+            smm = _intel_smm_ask()
+    opts = []
+    if geom.chans > 1:
+        opts.append('2chan')
+    if geom.dimms > 1:
+        opts.append('2dimm')
+    if geom.ranks > 1:
+        opts.append('2rank')
+    if smm.remap:
+        opts.append('='.join(('pcibase', hex(smm.pci_start))))
+        opts.append('='.join(('tom', hex(smm.topmem))))
+    return opts
 
 
-    ans = input('Path to write output to [{}]: '.format(outpath))
+def _handle_rasxor(ans):
+    if ans.startswith('custom'):
+        bit = _ask_int('RAS XOR bit')
+        mask = _ask_int('RAS XOR mask')
+        return ':'.join(('rasxor', 'bit={:d}'.format(bit), 'mask={:d}'.format(mask)))
+    else:
+        return ans
+
+
+def _writeout(cntrl, ctrlo, remaps, prettiness=1):
+    csep = ';\n' if prettiness else ';'
+    if prettiness > 1:
+        osep = '\n\t: '
+    elif prettiness:
+        osep = ' : '
+    else:
+        osep = ':'
+    return csep.join((
+        osep.join(('map', cntrl, *ctrlo)),
+        *(osep.join(('remap', x)) for x in remaps)
+    ))
+
+
+def _main():
+    parser = argparse.ArgumentParser(description='Detect memory system configuration')
+    parser.add_argument('-i', '--interactive-only', action='store_true',
+                        help='Do not attempt to autodetect anything; configure everything interactively')
+    parser.add_argument('-o', '--output', action='store', help='Output file')
+    parser.add_argument('-c', '--stdout', action='store_true',
+                        help='Output config to stdout')
+    parser.add_argument('-p', '--pretty', action='store_const', const=2, dest='pretty', default=1,
+                        help='Prettify output to make it more human-readable')
+    parser.add_argument('-u', '--ugly', action='store_const', const=0, dest='pretty', default=1,
+                        help='Make output more compact')
+    args = parser.parse_args()
+
+    if os.geteuid() != 0 and not args.interactive_only:
+        print(80 * '-')
+        print("*For best autodetection results it's recommended you run this tool as superuser*")
+        print(80 * '-')
+    outpath = args.output if args.output is not None else './mem.msys'
+
+    cntrl = _ask('memory controller', list(CONTROLLERS))
+    ctrlo = []
+
+    if cntrl.startswith('intel:'):
+        ctrlo = _intel_opts(cntrl, args.interactive_only)
+
+    remaps = []
+    ans = _ask_yn('Enable address pin mirroring for second rank?', False)
     if ans:
-        outpath = ans
-    with open(outpath, 'w') as f:
-        f.write(MSYS(cntrl, route, remap, geom, smm, ctrlo).to_file())
+        remaps.append(':'.join(('rankmirror', CONTROLLERS[cntrl])))
+    ans = _ask("additional on-DIMM remap (if unsure, select 'none')", REMAPS, 0)
+    if ans:
+        remaps.append(_handle_rasxor(ans))
+
+    cfgstr = _writeout(cntrl, ctrlo, remaps, prettiness=args.pretty)
+    if not args.stdout:
+        if args.output is None:
+            ans = input('Path to write output to [{}]: '.format(outpath))
+            if ans:
+                outpath = ans
+        with open(outpath, 'w') as f:
+            f.write(cfgstr)
+    else:
+        print(cfgstr)
 
 
 if __name__ == '__main__':

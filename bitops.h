@@ -1,26 +1,29 @@
 /*
  * Copyright (c) 2016 Andrei Tatar
+ * Copyright (c) 2017-2018 Vrije Universiteit Amsterdam
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
+ * This program is licensed under the GPL2+.
  */
 
 #ifndef _HAMTIME_RAMSES_BITOPS_H
 #define _HAMTIME_RAMSES_BITOPS_H 1
 
-#define LS_BITMASK(n) ((1UL << (n)) - 1)
+#define LS_BITMASK(n) ((1ULL << (n)) - 1)
 #define BIT(n,x) (((x) >> (n)) & 1)
 #define POP_BIT(n,x) (((x) & LS_BITMASK(n)) + (((x) >> ((n)+1)) << (n)))
+
+static inline int leastsetbit(long long v)
+{
+	if (v) {
+		int ret;
+		v = (v ^ (v-1)) >> 1;
+		for (ret = 0; v; ret++) {
+			v >>= 1;
+		}
+		return ret;
+	} else {
+		return -1;
+	}
+}
 
 #endif /* bitops.h */

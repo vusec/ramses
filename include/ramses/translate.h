@@ -1,43 +1,66 @@
 /*
- * Copyright (c) 2016 Andrei Tatar
+ * Copyright (c) 2017-2018 Vrije Universiteit Amsterdam
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
+ * This program is licensed under the GPL2+.
  */
 
 /* Virtual Address Translation */
 
-#ifndef _HAMTIME_RAMSES_TRANSLATE_H
-#define _HAMTIME_RAMSES_TRANSLATE_H 1
+#ifndef RAMSES_TRANSLATE_H
+#define RAMSES_TRANSLATE_H 1
 
 #include <ramses/types.h>
 
-/*
- * Heuristically attempt to translate a virtual address.
- * Keeps the prop_bits least significant bits of addr (assuming contiguousness) as a "page offset"
- * which it adds to base.
- *
- * Useful when you *know* you have a memory area that is physically contiguous
- * (e.g. 2MB pages => prop_bits = 21)
- */
-physaddr_t ramses_translate_heuristic(uintptr_t addr, int prop_bits, physaddr_t base);
+#include <stddef.h>
+
+/* Union argument to pass either a pointer, physical address or an int */
+union TranslateArg {
+	void *p;
+	physaddr_t pa;
+	int val;
+};
 
 /*
- * Use the /proc/[pid]/pagemap interface to translate a virtual address.
- * Returns (physaddr_t)(-1) and sets errno if errors occur.
+ * Translates virtual address `addr' into physical address.
+ * Returns RAMSES_BADADDR and sets errno if errors occur.
  * Sets errno to ENODATA if requested address is not mapped to memory.
  */
-physaddr_t ramses_translate_pagemap(uintptr_t addr, int pagemap_fd);
+typedef physaddr_t (*ramses_translate_fn_t)(uintptr_t addr,
+                                            int, union TranslateArg);
+/*
+ * Translates a virtually contiguous range of memory starting at `addr'
+ * (truncated to granularity alignment) spanning `npages' entries.
+ * Stores the results in `*out'.
+ * Returns the number of page entries translated.
+ * An entry not mapped in memory is translated to RAMSES_BADADDR.
+ */
+typedef size_t (*ramses_translate_range_fn_t)
+(uintptr_t addr, size_t npages, physaddr_t *out, int, union TranslateArg);
+
+struct Translation {
+	ramses_translate_fn_t translate;
+	ramses_translate_range_fn_t translate_range;
+	int page_shift;
+	union TranslateArg arg;
+};
+
+
+static inline physaddr_t
+ramses_translate(struct Translation *t, uintptr_t addr)
+{
+	return t->translate(addr, t->page_shift, t->arg);
+}
+
+static inline size_t
+ramses_translate_range(struct Translation *t, uintptr_t addr, size_t npages, physaddr_t *out)
+{
+	return t->translate_range(addr, npages, out, t->page_shift, t->arg);
+}
+
+/* Return the virt <-> phys address mapping granularity, in bytes */
+static inline size_t ramses_translate_granularity(struct Translation *t)
+{
+	return 1ULL << t->page_shift;
+}
 
 #endif /* translate.h */

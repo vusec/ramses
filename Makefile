@@ -1,39 +1,62 @@
 libname := ramses
-arname := lib$(libname).a
-soname := lib$(libname).so
 abi := 0
+EXTRA_CFLAGS ?= -DNDEBUG
 
-CC := gcc
-CFLAGS := -std=gnu99 -Wall -Wpedantic -O2 -fPIC -Iinclude
-LDFLAGS := -shared -Wl,-soname,$(soname).$(abi)
+srcs := $(wildcard *.c)
+srcs += $(wildcard translate/*.c)
+srcs += $(wildcard map/*.c)
+srcs += $(wildcard map/x86/*.c)
 
-obj_files := $(patsubst %.c,%.o,$(wildcard *.c))
-extra_headers := bitops.h include/$(libname)/types.h include/$(libname)/util.h include/$(libname)/vtlbucket.h
+libfname := lib$(libname)
+arsufx := .a
+sosufx := .so
+SYSLDFLAGS = -Wl,-soname,$(soname).$(abi)
+
+arname := $(libfname)$(arsufx)
+soname := $(libfname)$(sosufx)
+
+OFLAGS := -O2
+CPPFLAGS := -Iinclude -iquote .
+CFLAGS := -std=c99 -Wall -Wpedantic -pedantic -fPIC $(OFLAGS) $(CPPFLAGS) $(EXTRA_CFLAGS)
+LDFLAGS := -shared -Wall -Wpedantic -pedantic $(SYSLDFLAGS)
+
+deps := $(patsubst %.c,%.d,$(srcs))
+objs := $(patsubst %.c,%.o,$(srcs))
 
 all: $(arname) $(soname)
 
-# Override built-in compile rule
-%.o: %.c
-
-# Internal objects
-%.o: %.c %.h $(extra_headers)
-	$(CC) $(CFLAGS) -c $<
-
-# Exported objects
-%.o: %.c include/$(libname)/%.h $(extra_headers)
-	$(CC) $(CFLAGS) -c $<
-
 # Static lib
-$(arname): $(obj_files)
+$(arname): $(objs)
 	ar -rcs $@ $?
 
 # Dynamic lib
-$(soname): $(obj_files)
-	$(CC) $(LDFLAGS) -o $@.$(abi) $^
-	ln -sf $@.$(abi) $@
+$(soname): $(soname).$(abi)
+	ln -sf $< $@
 
-.PHONY: clean
+$(soname).$(abi): $(objs)
+	$(CC) $(LDFLAGS) -o $@ $^
+
+# Override built-in compile rule
+%.o: %.c
+	$(CC) -c -o $@ $(CFLAGS) $<
+
+# Dependency generation
+%.d: %.c
+	@set -e; \
+	DIR=`dirname $<`; \
+	case "$$DIR" in \
+	"" | ".") $(CC) -MM -MG $(CPPFLAGS) $< | sed 's|\(.*\)\.o[ :]*|\1.o \1.d : |g' > $@;; \
+	*) $(CC) -MM -MG $(CPPFLAGS) $< | sed "s|\(.*\)\.o[ :]*|$$DIR/\1.o $$DIR/\1.d : |g" > $@;; \
+	esac
+
+.PHONY: all clean cleanall
 
 clean:
-	rm -f $(arname) $(soname) $(soname).$(abi) $(obj_files)
+	rm -f $(arname) $(soname) $(soname).$(abi) $(implib) $(objs)
 	rm -rf tools/__pycache__
+	rm -rf pyramses/__pycache__
+
+cleanall: clean
+	rm -f $(deps)
+
+include $(deps)
