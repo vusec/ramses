@@ -19,6 +19,7 @@
 #include <ramses/msys.h>
 #include "msys_int.h"
 
+#include <stddef.h>
 #include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
@@ -237,6 +238,16 @@ static int msys_writeout(struct MemorySystem *m,
 		free(out_remaps);
 		free(out_allocs);
 		return ERR_OOM;
+	}
+
+	/* Replace remap instances with their clones */
+	if (inst_top) {
+		for (size_t i = 0; i < remap_top; i++) {
+			ptrdiff_t ipos = out_remaps[i] - inst_remaps;
+			if (ipos >= 0 && ipos < inst_top) {
+				out_remaps[i] = &inst_clone[ipos];
+			}
+		}
 	}
 
 	if (inst_top) out_allocs[alloc_top++] = inst_clone;
