@@ -235,31 +235,29 @@ struct BMPos ramses_bufmap_next(struct BufferMap *bm, struct BMPos p,
                                 enum DRAMLevel lvl)
 {
 	struct DRAMAddr ida = ramses_bufmap_addr(bm, p.ri, p.ei);
-	size_t colents = ((bm->msys->mapping.props.col_cnt - ida.col) *
-	                   bm->msys->mapping.props.cell_size
-	                 ) / bm->entry_len;
 	size_t ri = p.ri;
 	size_t ei = p.ei;
 	struct DRAMAddr da = ida;
+	size_t colents = ((bm->msys->mapping.props.col_cnt - da.col) *
+	                   bm->msys->mapping.props.cell_size) / bm->entry_len;
 	while (ramses_dramaddr_cmp(da, RAMSES_BADDRAMADDR) != 0 &&
 	       ramses_dramaddr_same(lvl, ida, da))
 	{
-		if (lvl == DRAM_ROW) {
-			size_t rements = bm->ranges[ri].entry_cnt - ei;
-			if (rements > colents) {
-				assert(colents);
-				ei += colents;
-				colents = 0;
-			} else {
-				colents -= rements;
-				ri++;
-				ei = 0;
-			}
+		if (lvl == DRAM_ROW &&
+		    bm->ranges[ri].entry_cnt - ei > colents)
+		{
+			assert(colents);
+			ei += colents;
+			colents = 0;
 		} else {
 			ri++;
 			ei = 0;
 		}
 		da = ramses_bufmap_addr(bm, ri, ei);
+		if (!ei) {
+			colents = ((bm->msys->mapping.props.col_cnt - da.col) *
+			           bm->msys->mapping.props.cell_size) / bm->entry_len;
+		}
 	}
 	return (struct BMPos){ .ri = ri, .ei = ei };
 }
