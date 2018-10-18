@@ -186,6 +186,7 @@ static const char *ERRMSGS[] = {
 	[ERR_EOF] = "Unexpected end of file",
 	[ERR_FLAGVAL] = "Flag argument supplied with value",
 };
+static const size_t ERRMSGS_LEN = sizeof(ERRMSGS) / sizeof(*ERRMSGS);
 
 static inline int suffix2shift(char suffix)
 {
@@ -470,7 +471,7 @@ bail:
 
 const char *ramses_msys_load_strerr(int err)
 {
-	return ERRMSGS[err];
+	return (err >= 0 && err < ERRMSGS_LEN) ? ERRMSGS[err] : NULL;
 }
 
 void ramses_msys_free(struct MemorySystem *m)
