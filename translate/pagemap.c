@@ -56,6 +56,7 @@ static size_t pagemap_range(uintptr_t addr, size_t npages, physaddr_t *out,
 	uint64_t *pagemap_buf = malloc(npages * sizeof(*pagemap_buf));
 	off_t pagemap_off = (addr >> page_shift) * sizeof(*pagemap_buf);
 	if (pagemap_buf != NULL) {
+		size_t fails = 0;
 		size_t read_ptes = pread(arg.val,
 		                         pagemap_buf,
 		                         npages * sizeof(*pagemap_buf),
@@ -66,10 +67,14 @@ static size_t pagemap_range(uintptr_t addr, size_t npages, physaddr_t *out,
 				out[i] = ((pagemap_buf[i] & LS_BITMASK(55)) << page_shift);
 			} else {
 				out[i] = RAMSES_BADADDR;
+				fails++;
 			}
 		}
 		free(pagemap_buf);
-		return read_ptes;
+		if (fails) {
+			errno = ENODATA;
+		}
+		return read_ptes - fails;
 	} else {
 		return 0;
 	}

@@ -31,8 +31,9 @@ typedef physaddr_t (*ramses_translate_fn_t)(uintptr_t addr,
  * Translates a virtually contiguous range of memory starting at `addr'
  * (truncated to granularity alignment) spanning `npages' entries.
  * Stores the results in `*out'.
- * Returns the number of page entries translated.
- * An entry not mapped in memory is translated to RAMSES_BADADDR.
+ * Returns the number of page entries successfully translated.
+ * An entry not mapped in memory is translated to RAMSES_BADADDR and errno is
+ * set accordingly.
  */
 typedef size_t (*ramses_translate_range_fn_t)
 (uintptr_t addr, size_t npages, physaddr_t *out, int, union TranslateArg);
